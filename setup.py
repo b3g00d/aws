@@ -49,13 +49,15 @@ setup(
         "Operating System :: OS Independent",
         "Topic :: Software Development :: Libraries :: Python Modules",
         "Topic :: Internet",
-        "Programming Language :: Python :: 2",
-        "Programming Language :: Python :: 2.7",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.6",
+        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
     ],
     keywords='thumbor aws',
     install_requires=[
         'python-dateutil',
-        'thumbor>=6.0.0,<7',
+        'thumbor>=7.0.0a2,<8',
         'tornado-botocore',
     ],
     extras_require={

@@ -7,9 +7,9 @@
 import botocore.session
 from botocore.utils import fix_s3_host
 from tornado_botocore.base import Botocore
-from tornado.concurrent import return_future
 from thumbor.utils import logger
 from thumbor.engines import BaseEngine
+import functools
 
 
 class Bucket(object):
@@ -17,7 +17,7 @@ class Bucket(object):
 
     @staticmethod
     def __new__(cls, bucket, region, endpoint, *args, **kwargs):
-        key = (bucket, region, endpoint) + args + reduce(lambda x, y: x + y, kwargs.items(), ())
+        key = (bucket, region, endpoint) + args + functools.reduce(lambda x, y: x + y, kwargs.items(), ())
 
         if not cls._instances.get(key):
             cls._instances[key] = super(Bucket, cls).__new__(cls)
@@ -58,21 +58,18 @@ class Bucket(object):
                                            operation='DeleteObject', session=self._session,
                                            endpoint_url=self._endpoint)
 
-    @return_future
-    def get(self, path, callback=None):
+    async def get(self, path):
         """
         Returns object at given path
         :param string path: Path or 'key' to retrieve AWS object
         :param callable callback: Callback function for once the retrieval is done
         """
-        self._get_client.call(
-            callback=callback,
+        return self._get_client.call(
             Bucket=self._bucket,
             Key=self._clean_key(path),
         )
 
-    @return_future
-    def get_url(self, path, method='GET', expiry=3600, callback=None):
+    async def get_url(self, path, method='GET', expiry=3600):
         """
         Generates the presigned url for given key & methods
         :param string path: Path or 'key' for requested object
@@ -92,10 +89,9 @@ class Bucket(object):
             HttpMethod=method,
         )
 
-        callback(url)
+        return url
 
-    @return_future
-    def put(self, path, data, metadata={}, reduced_redundancy=False, encrypt_key=False, callback=None):
+    async def put(self, path, data, metadata={}, reduced_redundancy=False, encrypt_key=False):
         """
         Stores data at given path
         :param string path: Path or 'key' for created/updated object
@@ -109,7 +105,6 @@ class Bucket(object):
         content_type = BaseEngine.get_mimetype(data) or 'application/octet-stream'
 
         args = dict(
-            callback=callback,
             Bucket=self._bucket,
             Key=self._clean_key(path),
             Body=data,
@@ -121,17 +116,15 @@ class Bucket(object):
         if encrypt_key:
             args['ServerSideEncryption'] = 'AES256'
 
-        self._put_client.call(**args)
+        return self._put_client.call(**args)
 
-    @return_future
-    def delete(self, path, callback=None):
+    async def delete(self, path):
         """
         Deletes key at given path
         :param string path: Path or 'key' to delete
         :param callable callback: Called function once done
         """
-        self._delete_client.call(
-            callback=callback,
+        return self._delete_client.call(
             Bucket=self._bucket,
             Key=self._clean_key(path),
         )

@@ -8,50 +8,43 @@ import thumbor.loaders.http_loader as http_loader
 from thumbor.utils import logger
 from thumbor.loaders import LoaderResult
 
-from tornado.concurrent import return_future
-
 from . import *
 from ..aws.bucket import Bucket
 
 def validate(context, url, normalize_url_func=http_loader._normalize_url):
     return _validate(context, url, normalize_url_func)
 
-@return_future
-def load(context, url, callback):
+async def load(context, url):
     """
     Loads image
     :param Context context: Thumbor's context
     :param string url: Path to load
-    :param callable callback: Callback method once done
     """
     if _use_http_loader(context, url):
-        http_loader.load_sync(context, url, callback, normalize_url_func=http_loader._normalize_url)
-        return
+        return await http_loader.load(context, url, normalize_url_func=http_loader._normalize_url)
 
     bucket, key = _get_bucket_and_key(context, url)
 
     if not _validate_bucket(context, bucket):
         result = LoaderResult(successful=False,
                               error=LoaderResult.ERROR_NOT_FOUND)
-        callback(result)
-        return
+        return result
 
     loader = Bucket(bucket, context.config.get('TC_AWS_REGION'), context.config.get('TC_AWS_ENDPOINT'))
     handle_data = HandleDataFunc.as_func(key,
-                                         callback=callback,
                                          bucket_loader=loader,
                                          max_retry=context.config.get('TC_AWS_MAX_RETRY'))
 
-    loader.get(key, callback=handle_data)
+    file_key = await loader.get(key)
+    return handle_data(file_key)
 
 
 class HandleDataFunc(object):
 
-    def __init__(self, key, callback=None,
+    def __init__(self, key,
                  bucket_loader=None, max_retry=0):
         self.key = key
         self.bucket_loader = bucket_loader
-        self.callback = callback
         self.max_retry = max_retry
         self.retries_counter = 0
 
@@ -89,16 +82,14 @@ class HandleDataFunc(object):
 
             if not file_key:
                 result.error = LoaderResult.ERROR_UPSTREAM
-                self.callback(result)
-                return
+                return result
 
             response_metadata = file_key.get('ResponseMetadata', {})
             status_code = response_metadata.get('HTTPStatusCode')
 
             if status_code == 404:
                 result.error = LoaderResult.ERROR_NOT_FOUND
-                self.callback(result)
-                return
+                return result
 
             if self.retries_counter < self.max_retry:
                 self.__increment_retry_counter()
@@ -106,7 +97,6 @@ class HandleDataFunc(object):
                                        callback=self.dispatch)
             else:
                 result.error = LoaderResult.ERROR_UPSTREAM
-                self.callback(result)
+                return result
         else:
-            self.callback(file_key['Body'].read())
-
+            return file_key['Body'].read()

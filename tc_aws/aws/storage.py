@@ -9,8 +9,6 @@ from os.path import join, splitext
 from datetime import datetime
 from dateutil.tz import tzutc
 from hashlib import sha1
-
-from tornado.concurrent import return_future
 from thumbor.utils import logger
 
 from .bucket import Bucket
@@ -47,19 +45,16 @@ class AwsStorage():
         self.config_prefix = config_prefix
         self.context = context
 
-    @return_future
-    def get(self, path, callback):
+    async def get(self, path):
         """
         Gets data at path
         :param string path: Path for data
-        :param callable callback: Callback function for once the retrieval is done
         """
         file_abspath = self._normalize_path(path)
 
-        self.storage.get(file_abspath, callback=callback)
+        return await self.storage.get(file_abspath)
 
-    @return_future
-    def set(self, bytes, abspath, callback=None):
+    async def set(self, bytes, abspath):
         """
         Stores data at given path
         :param bytes bytes: Data to store
@@ -72,39 +67,34 @@ class AwsStorage():
         if self.config_prefix is 'TC_AWS_RESULT_STORAGE' and self.context.config.get('TC_AWS_STORE_METADATA'):
             metadata = dict(self.context.headers)
 
-        self.storage.put(
+        return await self.storage.put(
             abspath,
             bytes,
             metadata=metadata,
             reduced_redundancy=self.context.config.get('TC_AWS_STORAGE_RRS', False),
             encrypt_key=self.context.config.get('TC_AWS_STORAGE_SSE', False),
-            callback=callback,
         )
 
-    @return_future
-    def remove(self, abspath, callback=None):
+    async def remove(self, abspath):
         """
         Deletes data at abspath
         :param string abspath: Absolute path to delete
         """
-        self.storage.delete(abspath, callback)
+        return await self.storage.delete(abspath)
 
-    @return_future
-    def exists(self, path, callback):
+    async def exists(self, path):
         """
         Tells if data exists at given path
         :param string path: Path to check
-        :param callable callback: Callback function for once the check is done
         """
         file_abspath = self._normalize_path(path)
 
-        def return_data(file_key):
-            if not file_key or self._get_error(file_key):
-                callback(False)
-            else:
-                callback(True)
+        file_key = await self.storage.get(file_abspath)
 
-        self.storage.get(file_abspath, callback=return_data)
+        if not file_key or self._get_error(file_key):
+            return False
+
+        return True
 
     def is_expired(self, key):
         """
@@ -127,11 +117,9 @@ class AwsStorage():
             #If our key is bad just say we're expired
             return True
 
-    @return_future
-    def last_updated(self, callback):
+    async def last_updated(self):
         """
         Tells when the image has last been updated
-        :param callable callback: Callback function for once the retrieval is done
         """
         path = self.context.request.url
         file_abspath = self._normalize_path(path)
@@ -139,18 +127,17 @@ class AwsStorage():
         def on_file_fetched(file):
             if not file or self._get_error(file) or self.is_expired(file) or 'LastModified' not in file:
                 logger.warn("[AwsStorage] s3 key not found at %s" % file_abspath)
-                callback(None)
+                return None
             else:
-                callback(file['LastModified'])
+                return file['LastModified']
 
-        self.storage.get(file_abspath, callback=on_file_fetched)
+        file = await self.storage.get(file_abspath)
+        return on_file_fetched(file)
 
-    @return_future
-    def get_crypto(self, path, callback):
+    async def get_crypto(self, path):
         """
         Retrieves crypto data at path
         :param string path: Path to search for crypto data
-        :param callable callback: Callback function for once the retrieval is done
         """
         file_abspath = self._normalize_path(path)
         crypto_path = "%s.txt" % (splitext(file_abspath)[0])
@@ -158,22 +145,21 @@ class AwsStorage():
         def return_data(file_key):
             if not file_key or self._get_error(file_key) or self.is_expired(file_key) or 'Body' not in file_key:
                 logger.warn("[STORAGE] s3 key not found at %s" % crypto_path)
-                callback(None)
+                return None
             else:
-                callback(file_key['Body'])
+                return file_key['Body']
 
-        self.storage.get(crypto_path, callback=return_data)
+        file_key = await self.storage.get(crypto_path)
+        return return_data(file_key)
 
-    @return_future
-    def put_crypto(self, path, callback):
+    async def put_crypto(self, path):
         """
         Stores crypto data at given path
         :param string path: Path to store the data at
         :return: Path where the crypto data is stored
         """
         if not self.context.config.STORES_CRYPTO_KEY_FOR_EACH_IMAGE:
-            callback(None)
-            return
+            return None
 
         if not self.context.server.security_key:
             raise RuntimeError("STORES_CRYPTO_KEY_FOR_EACH_IMAGE can't be True if no SECURITY_KEY specified")
@@ -181,18 +167,13 @@ class AwsStorage():
         file_abspath = self._normalize_path(path)
         crypto_path = '%s.txt' % splitext(file_abspath)[0]
 
-        def cb(*args, **kwargs):
-            callback(crypto_path)
+        await self.set(self.context.server.security_key, crypto_path)
+        return crypto_path
 
-        self.set(self.context.server.security_key, crypto_path, cb)
-
-
-    @return_future
-    def get_detector_data(self, path, callback):
+    async def get_detector_data(self, path):
         """
         Retrieves detector data from storage
         :param string path: Path where the data is stored
-        :param callable callback: Callback function for once the retrieval is done
         """
         file_abspath = self._normalize_path(path)
         path = '%s.detectors.txt' % splitext(file_abspath)[0]
@@ -200,14 +181,14 @@ class AwsStorage():
         def return_data(file_key):
             if not file_key or self._get_error(file_key) or self.is_expired(file_key) or 'Body' not in file_key:
                 logger.warn("[AwsStorage] s3 key not found at %s" % path)
-                callback(None)
+                return None
             else:
-                callback(loads(file_key['Body'].read()))
+                return loads(file_key['Body'].read())
 
-        self.storage.get(path, callback=return_data)
+        file_key = await self.storage.get(path)
+        return return_data(file_key)
 
-    @return_future
-    def put_detector_data(self, path, data, callback):
+    async def put_detector_data(self, path, data):
         """
         Stores detector data at given path
         :param string path: Path to store the data at
@@ -219,7 +200,7 @@ class AwsStorage():
 
         path = '%s.detectors.txt' % splitext(file_abspath)[0]
 
-        self.set(dumps(data), path, callback)
+        return await self.set(dumps(data), path)
 
     def _get_error(self, response):
         """

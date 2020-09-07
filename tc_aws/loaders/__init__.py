@@ -6,7 +6,7 @@
 
 __all__ = ['_get_bucket_and_key', '_get_bucket', '_get_key', '_validate_bucket', '_use_http_loader', '_validate']
 
-import urllib2
+import urllib.parse
 import thumbor.loaders.http_loader as http_loader
 
 def _get_bucket_and_key(context, url):
@@ -17,7 +17,7 @@ def _get_bucket_and_key(context, url):
     :return: A tuple with the bucket and the key detected
     :rtype: tuple
     """
-    url = urllib2.unquote(url)
+    url = urllib.parse.unquote(url)
 
     bucket = context.config.get('TC_AWS_LOADER_BUCKET')
     if not bucket:
